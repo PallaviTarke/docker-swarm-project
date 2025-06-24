@@ -7,13 +7,13 @@ services:
     ports:
       - "3100:3100"
     volumes:
-      - ./loki-config.yaml:/etc/loki/local-config.yaml
+      - ./loki-config.yaml:/etc/loki/loki-config.yaml
       - ./loki-data/chunks:/loki/chunks
       - ./loki-data/rules:/loki/rules
       - ./loki-data/index:/loki/index
       - ./loki-data/compactor:/loki/compactor
       - ./loki-data/wal:/loki/wal
-    command: -config.file=/etc/loki/local-config.yaml
+    command: -config.file=/etc/loki/loki-config.yaml
     networks:
       - app-net
 
@@ -134,6 +134,24 @@ services:
       placement:
         constraints:
           - node.hostname == swarm-wkr
+
+  redis-sentinel:
+    image: redis:7
+    container_name: redis-sentinel
+    command: ["/bin/sh", "-c", "/redis-sentinel-entrypoint.sh"]
+    volumes:
+      - ./sentinel.conf:/etc/redis/sentinel.conf
+      - ./redis-sentinel-entrypoint.sh:/redis-sentinel-entrypoint.sh
+    depends_on:
+      - redis-master
+      - redis-slave
+    deploy:
+      placement:
+        constraints:
+          - node.hostname == swarm-wkr
+    networks:
+      - app-net
+        
 
   vault:
     image: vault:latest
