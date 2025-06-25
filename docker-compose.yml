@@ -3,7 +3,6 @@ version: '3.8'
 services:
   loki:
     image: grafana/loki:2.9.4
-    container_name: loki
     ports:
       - "3100:3100"
     volumes:
@@ -19,13 +18,11 @@ services:
 
   promtail:
     image: grafana/promtail:2.9.4
-    container_name: promtail
-    restart: always
     command: -config.file=/etc/promtail/promtail.yaml
     volumes:
       - ./promtail-config.yaml:/etc/promtail/promtail.yaml
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro  # 🚨 Add this
+      - /var/run/docker.sock:/var/run/docker.sock:ro
       - /etc/machine-id:/etc/machine-id:ro
       - /etc/hostname:/etc/hostname:ro
       - /etc/os-release:/etc/os-release:ro
@@ -34,8 +31,6 @@ services:
 
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:v0.47.2
-    container_name: cadvisor
-    restart: always
     ports:
       - "8080:8080"
     volumes:
@@ -45,7 +40,7 @@ services:
       - /var/lib/docker/:/var/lib/docker:ro
     networks:
       - app-net
-      
+
   nginx:
     image: nginx:latest
     ports:
@@ -55,8 +50,8 @@ services:
     depends_on:
       - node
     deploy:
-      placement: 
-        constraints: 
+      placement:
+        constraints:
           - node.role == manager
 
   node:
@@ -66,11 +61,12 @@ services:
       - REDIS_URL=redis://redis-master:6379
     deploy:
       replicas: 2
+    networks:
+      - app-net
 
   mongo1:
     image: mongo:6
     hostname: mongo1
-    command: ["--replSet", "rs0"]
     volumes:
       - mongo1_data:/data/db
     command: >
@@ -81,23 +77,22 @@ services:
         done;
         if ! mongosh --host localhost --eval 'rs.status()' | grep -q 'myState'; then
           echo 'Initializing replica set...';
-          mongosh --host localhost --eval \"
+          mongosh --host localhost --eval "
             rs.initiate({
               _id: 'rs0',
               members: [
                 { _id: 0, host: 'mongo1:27017' },
-                { _id: 1, host: 'mongo2:27017' },
-                { _id: 2, host: 'mongo3:27017' }
+                { _id: 1, host: 'mongo2:27017' }
               ]
             })
-          \"
+          "
         else
           echo 'Replica set already initialized.';
         fi;
         tail -f /dev/null
       "
     networks:
-      - app-net  
+      - app-net
     deploy:
       placement:
         constraints:
@@ -109,6 +104,8 @@ services:
     command: ["--replSet", "rs0"]
     volumes:
       - mongo2_data:/data/db
+    networks:
+      - app-net
     deploy:
       placement:
         constraints:
@@ -118,6 +115,8 @@ services:
     image: redis:7
     volumes:
       - redis_master_data:/data
+    networks:
+      - app-net
     deploy:
       placement:
         constraints:
@@ -130,6 +129,8 @@ services:
     command: ["redis-server", "--replicaof", "redis-master", "6379"]
     volumes:
       - redis_slave_data:/data
+    networks:
+      - app-net
     deploy:
       placement:
         constraints:
@@ -137,7 +138,6 @@ services:
 
   redis-sentinel:
     image: redis:7
-    container_name: redis-sentinel
     command: ["/bin/sh", "-c", "/redis-sentinel-entrypoint.sh"]
     volumes:
       - ./sentinel.conf:/etc/redis/sentinel.conf
@@ -145,13 +145,12 @@ services:
     depends_on:
       - redis-master
       - redis-slave
+    networks:
+      - app-net
     deploy:
       placement:
         constraints:
           - node.hostname == swarm-wkr
-    networks:
-      - app-net
-        
 
   vault:
     image: vault:latest
@@ -162,6 +161,8 @@ services:
       - VAULT_DEV_LISTEN_ADDRESS=0.0.0.0:8200
     ports:
       - "8200:8200"
+    networks:
+      - app-net
     deploy:
       placement:
         constraints:
@@ -169,20 +170,16 @@ services:
 
   prometheus:
     image: prom/prometheus
-    container_name: prometheus
-    restart: always
     ports:
       - "9090:9090"
     volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./monitoring/prometheus.yml:/etc/monitoring/prometheus.yml
     networks:
       - app-net
 
   grafana:
     image: grafana/grafana
-    container_name: grafana
-    restart: always
-    volumes: 
+    volumes:
       - grafana-data:/var/lib/grafana
     ports:
       - "3001:3000"
@@ -191,8 +188,6 @@ services:
 
   redis_exporter:
     image: oliver006/redis_exporter
-    container_name: redis_exporter
-    restart: always
     ports:
       - "9121:9121"
     command:
@@ -204,8 +199,6 @@ services:
 
   haproxy:
     image: haproxy:latest
-    container_name: haproxy
-    restart: always
     volumes:
       - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg
     ports:
@@ -214,13 +207,14 @@ services:
       - app-net
     depends_on:
       - redis-master
-      - redis-replica1
-      - redis-replica2
-        
+      - redis-slave
 
+networks:
+  app-net:
 
 volumes:
   mongo1_data:
   mongo2_data:
   redis_master_data:
   redis_slave_data:
+  grafana-data:
