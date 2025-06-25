@@ -7,15 +7,21 @@ services:
     ports:
       - "3100:3100"
     volumes:
-      - ./loki-config.yaml:/etc/loki/loki-config.yaml
-      - ./loki-data/chunks:/loki/chunks
-      - ./loki-data/rules:/loki/rules
-      - ./loki-data/index:/loki/index
-      - ./loki-data/compactor:/loki/compactor
-      - ./loki-data/wal:/loki/wal
+      - /home/pallavi/gcp-docker-swarm-monitoring/loki-config.yaml:/etc/loki/loki-config.yaml
+      - /home/pallavi/gcp-docker-swarm-monitoring/loki-data/chunks:/loki/chunks
+      - /home/pallavi/gcp-docker-swarm-monitoring/loki-data/rules:/loki/rules
+      - /home/pallavi/gcp-docker-swarm-monitoring/loki-data/index:/loki/index
+      - /home/pallavi/gcp-docker-swarm-monitoring/loki-data/compactor:/loki/compactor
+      - /home/pallavi/gcp-docker-swarm-monitoring/loki-data/wal:/loki/wal
+
     command: -config.file=/etc/loki/loki-config.yaml
     networks:
       - app-net
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
+
 
   promtail:
     image: grafana/promtail:2.9.4
@@ -25,10 +31,16 @@ services:
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /etc/machine-id:/etc/machine-id:ro
-      - /etc/hostname:/etc/hostname:ro
       - /etc/os-release:/etc/os-release:ro
     networks:
       - app-net
+    deploy:
+      mode: global
+      placement:
+        constraints:
+          - node.role == manager
+
+      
 
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:v0.47.2
@@ -41,6 +53,8 @@ services:
       - /var/lib/docker/:/var/lib/docker:ro
     networks:
       - app-net
+    deploy:
+      mode: global
 
   nginx:
     image: nginx:latest
@@ -153,7 +167,7 @@ services:
     deploy:
       placement:
         constraints:
-          - node.hostname == docker-swarm-wkr
+          - node.hostname == docker-swarm-wrk
 
   haproxy:
     image: haproxy:latest
@@ -196,15 +210,49 @@ services:
       - /home/pallavi/gcp-docker-swarm-monitoring/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
     networks:
       - app-net
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
+
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    ports:
+      - "9100:9100"
+    networks:
+      - app-net
+    deploy:
+      mode: global
+
 
   grafana:
-    image: grafana/grafana
-    volumes:
-      - grafana-data:/var/lib/grafana
+    image: grafana/grafana:latest
     ports:
       - "3001:3000"
     networks:
+      - app-net 
+    volumes:
+      - grafana-data:/var/lib/grafana
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
+
+  mongo-exporter:
+    image: bitnami/mongodb-exporter:0.40.0
+    ports:
+      - "9216:9216"
+    environment:
+      - MONGODB_URI=mongodb://mongo1:27017
+    networks:
       - app-net
+    deploy:
+      placement:
+        constraints:
+          - node.hostname == docker-swarm-mgr
+
+
 
   redis_exporter:
     image: oliver006/redis_exporter
@@ -216,6 +264,10 @@ services:
       - haproxy
     networks:
       - app-net
+    deploy:
+      placement:
+        constraints:
+          - node.hostname == docker-swarm-mgr
 
 configs:
   haproxy_config:
