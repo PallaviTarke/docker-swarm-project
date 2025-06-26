@@ -118,7 +118,7 @@ services:
   mongo2:
     image: mongo:6
     hostname: mongo2
-    command: ["--replSet", "rs0"]
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
     volumes:
       - mongo2_data:/data/db
     networks:
@@ -248,13 +248,14 @@ services:
     ports:
       - "9216:9216"
     environment:
-      - MONGODB_URI=mongodb://mongo1:27017
+      - MONGODB_URI=mongodb://mongo1:27017,mongo2:27017/mydb?replicaSet=rs0
     networks:
       - app-net
     deploy:
       placement:
         constraints:
           - node.hostname == swarm-manager
+
 
 
 
