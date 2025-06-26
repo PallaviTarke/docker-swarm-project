@@ -113,7 +113,7 @@ services:
     deploy:
       placement:
         constraints:
-          - node.hostname == docker-swarm-mgr
+          - node.hostname == swarm-manager
 
   mongo2:
     image: mongo:6
@@ -126,7 +126,7 @@ services:
     deploy:
       placement:
         constraints:
-          - node.hostname == docker-swarm-wrk
+          - node.hostname == swarm-worker
 
   redis-master:
     image: redis:7
@@ -137,7 +137,7 @@ services:
     deploy:
       placement:
         constraints:
-          - node.hostname == docker-swarm-mgr
+          - node.hostname == swarm-manager
 
   redis-slave:
     image: redis:7
@@ -155,10 +155,12 @@ services:
 
   redis-sentinel:
     image: redis:7
-    command: ["/bin/sh", "-c", "/redis-sentinel-entrypoint.sh"]
-    volumes:
-      - ./sentinel.conf:/etc/redis/sentinel.conf
-      - ./redis-sentinel-entrypoint.sh:/redis-sentinel-entrypoint.sh
+    entrypoint: ["/bin/sh", "/usr/local/bin/redis-sentinel-entrypoint.sh"]
+    configs:
+      - source: redis_sentinel_conf
+        target: /etc/redis/sentinel.conf
+      - source: redis_sentinel_entrypoint
+        target: /usr/local/bin/redis-sentinel-entrypoint.sh
     depends_on:
       - redis-master
       - redis-slave
@@ -167,7 +169,9 @@ services:
     deploy:
       placement:
         constraints:
-          - node.hostname == docker-swarm-wrk
+          - node.hostname == swarm-worker
+
+
 
   haproxy:
     image: haproxy:latest
@@ -184,7 +188,7 @@ services:
     deploy:
       placement:
         constraints:
-          - node.hostname == docker-swarm-mgr
+          - node.hostname == swarm-manager
 
   vault:
     image: hashicorp/vault:1.15.4
@@ -250,7 +254,7 @@ services:
     deploy:
       placement:
         constraints:
-          - node.hostname == docker-swarm-mgr
+          - node.hostname == swarm-manager
 
 
 
@@ -267,11 +271,16 @@ services:
     deploy:
       placement:
         constraints:
-          - node.hostname == docker-swarm-mgr
+          - node.hostname == swarm-manager
 
 configs:
   haproxy_config:
     file: ./haproxy.cfg
+  redis_sentinel_conf:
+    file: ./sentinel.conf
+  redis_sentinel_entrypoint:
+    file: ./redis-sentinel-entrypoint.sh
+
 
 networks:
   app-net:
