@@ -3,25 +3,18 @@ version: '3.8'
 services:
   loki:
     image: grafana/loki:2.9.4
-    user: "0:0" 
-    ports:
-      - "3100:3100"
-    volumes:
-      - /home/pallavi/gcp-docker-swarm-monitoring/loki-config.yaml:/etc/loki/loki-config.yaml
-      - /home/pallavi/gcp-docker-swarm-monitoring/loki-data/chunks:/loki/chunks
-      - /home/pallavi/gcp-docker-swarm-monitoring/loki-data/rules:/loki/rules
-      - /home/pallavi/gcp-docker-swarm-monitoring/loki-data/index:/loki/index
-      - /home/pallavi/gcp-docker-swarm-monitoring/loki-data/compactor:/loki/compactor
-      - /home/pallavi/gcp-docker-swarm-monitoring/loki-data/wal:/loki/wal
-
+    configs:
+      - source: loki-config
+        target: /etc/loki/loki-config.yaml
     command: -config.file=/etc/loki/loki-config.yaml
-    networks:
-      - app-net
+    volumes:
+      - /home/azureuser/gcp-docker-swarm-monitoring/loki-data:/loki
     deploy:
       placement:
         constraints:
-          - node.role == manager
-
+          - node.hostname == docker-swarm-mgr-1
+    ports:
+      - "3100:3100"
 
   promtail:
     image: grafana/promtail:2.9.4
@@ -36,11 +29,6 @@ services:
       - app-net
     deploy:
       mode: global
-      placement:
-        constraints:
-          - node.role == manager
-
-      
 
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:v0.47.2
@@ -72,7 +60,7 @@ services:
           - node.role == manager
 
   node:
-    image: pallavitarke04/nodeapp
+    image: pallavitarke04/nodeapp:latest
     environment:
       - MONGO_URL=mongodb://mongo1:27017,mongo2:27017/mydb?replicaSet=rs0
       - REDIS_URL=redis://redis-master:6379
@@ -83,7 +71,12 @@ services:
 
   mongo1:
     image: mongo:6
-    hostname: mongo1
+    container_name: mongo1
+    restart: always
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo1-data:/data/db
     command: >
       bash -c "
         mongod --replSet rs0 --bind_ip_all &
@@ -97,84 +90,147 @@ services:
               _id: \"rs0\",
               members: [
                 { _id: 0, host: \"mongo1:27017\" },
-                { _id: 1, host: \"mongo2:27017\" }
+                { _id: 1, host: \"mongo2:27017\" },
+                { _id: 2, host: \"mongo3:27017\" }
               ]
-            })
-          '
+            })'
         else
           echo 'Replica set already initialized.';
         fi;
-        tail -f /dev/null
-      "
-    volumes:
-      - mongo1_data:/data/db
+        tail -f /dev/null"
     networks:
       - app-net
     deploy:
       placement:
         constraints:
-          - node.hostname == swarm-manager
+          - node.hostname == docker-swarm-mgr-1
 
   mongo2:
     image: mongo:6
-    hostname: mongo2
-    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    container_name: mongo2
+    restart: always
     volumes:
-      - mongo2_data:/data/db
+      - mongo2-data:/data/db
+    command: ["mongod", "--replSet", "rs0"]
     networks:
       - app-net
     deploy:
       placement:
         constraints:
-          - node.hostname == swarm-worker
+          - node.hostname == docker-swarm-mgr-2
+
+
+  mongo3:
+    image: mongo:6
+    container_name: mongo3
+    restart: always
+    volumes:
+      - mongo3-data:/data/db
+    command: ["mongod", "--replSet", "rs0"]
+    networks:
+      - app-net
+    deploy:
+      placement:
+        constraints:
+          - node.hostname == docker-swarm-wrk-1
 
   redis-master:
     image: redis:7
+    hostname: redis-master
+    restart: always
+    ports:
+      - "6379:6379"
     volumes:
-      - redis_master_data:/data
+      - redis-master-data:/data
     networks:
       - app-net
     deploy:
       placement:
         constraints:
-          - node.hostname == swarm-manager
+          - node.role == manager
 
-  redis-slave:
+
+
+  redis-replica1:
     image: redis:7
+    container_name: redis-replica1
+    restart: always
     depends_on:
       - redis-master
+    volumes:
+      - redis-replica1-data:/data
     command: ["redis-server", "--replicaof", "redis-master", "6379"]
-    volumes:
-      - redis_slave_data:/data
     networks:
       - app-net
-    #deploy:
-      #placement:
-        #constraints:
-          #- node.hostname == docker-swarm-wkr
 
-  redis-sentinel:
+  redis-replica2:
     image: redis:7
-    entrypoint: ["/bin/sh", "/usr/local/bin/redis-sentinel-entrypoint.sh"]
-    configs:
-      - source: redis_sentinel_conf
-        target: /etc/redis/sentinel.conf
-      - source: redis_sentinel_entrypoint
-        target: /usr/local/bin/redis-sentinel-entrypoint.sh
+    container_name: redis-replica2
+    restart: always
     depends_on:
       - redis-master
-      - redis-slave
+    volumes:
+      - redis-replica2-data:/data
+    command: ["redis-server", "--replicaof", "redis-master", "6379"]
     networks:
       - app-net
-    deploy:
-      placement:
-        constraints:
-          - node.hostname == swarm-worker
 
+#  redis-sentinel1:
+#    image: redis:7
+#    ports:
+#      - "26379:26379"
+#    configs:
+#      - source: redis_sentinel_conf
+#        target: /etc/redis/sentinel.conf
+#      - source: redis_sentinel_entrypoint
+#        target: /usr/local/bin/redis-sentinel-entrypoint.sh
+#        mode: 0555  # Make sure it's executable
+#    entrypoint: ["bash", "/usr/local/bin/redis-sentinel-entrypoint.sh"]
+#    networks:
+#      - app-net
+#    deploy:
+#      placement:
+#        constraints:
+#          - node.hostname == docker-swarm-mgr-1
+
+#  redis-sentinel2:
+#    image: redis:7
+#    ports:
+#      - "26379:26379"
+#    configs:
+#      - source: redis_sentinel_conf
+#        target: /etc/redis/sentinel.conf
+#      - source: redis_sentinel_entrypoint
+#        target: /usr/local/bin/redis-sentinel-entrypoint.sh
+#        mode: 0555  # Make sure it's executable
+#    entrypoint: ["bash", "/usr/local/bin/redis-sentinel-entrypoint.sh"]
+#    networks:
+#      - app-net
+#    deploy:
+#      placement:
+#        constraints:
+#          - node.hostname == docker-swarm-mgr-2
+
+#  redis-sentinel3:
+#    image: redis:7
+#    configs:
+#      - source: redis_sentinel_conf
+#        target: /etc/redis/sentinel.conf
+#      - source: redis_sentinel_entrypoint
+#        target: /usr/local/bin/redis-sentinel-entrypoint.sh
+#        mode: 0555  # Make sure it's executable
+#    entrypoint: ["bash", "/usr/local/bin/redis-sentinel-entrypoint.sh"]
+#    networks:
+#      - app-net
+#    deploy:
+#      placement:
+#        constraints:
+#          - node.hostname == docker-swarm-wrk-1
 
 
   haproxy:
-    image: haproxy:latest
+   image: haproxy:latest
+    container_name: haproxy
     configs:
       - source: haproxy_config
         target: /usr/local/etc/haproxy/haproxy.cfg
@@ -182,13 +238,14 @@ services:
       - "6380:6380"
     depends_on:
       - redis-master
-      - redis-slave
+      - redis-replica1
+      - redis-replica2
     networks:
       - app-net
     deploy:
       placement:
         constraints:
-          - node.hostname == swarm-manager
+          - node.role == manager
 
   vault:
     image: hashicorp/vault:1.15.4
@@ -211,7 +268,7 @@ services:
     ports:
       - "9090:9090"
     volumes:
-      - /home/pallavi/gcp-docker-swarm-monitoring/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
     networks:
       - app-net
     deploy:
@@ -219,6 +276,18 @@ services:
         constraints:
           - node.role == manager
 
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+    networks:
+      - app-net 
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
 
   node-exporter:
     image: prom/node-exporter:latest
@@ -229,35 +298,14 @@ services:
     deploy:
       mode: global
 
-
-  grafana:
-    image: grafana/grafana:latest
-    ports:
-      - "3001:3000"
-    networks:
-      - app-net 
-    volumes:
-      - grafana-data:/var/lib/grafana
-    deploy:
-      placement:
-        constraints:
-          - node.role == manager
-
   mongo-exporter:
     image: bitnami/mongodb-exporter:0.40.0
     ports:
       - "9216:9216"
     environment:
-      - MONGODB_URI=mongodb://mongo1:27017,mongo2:27017/mydb?replicaSet=rs0
+      - MONGODB_URI=mongodb://mongo1:27017
     networks:
       - app-net
-    deploy:
-      placement:
-        constraints:
-          - node.hostname == swarm-manager
-
-
-
 
   redis_exporter:
     image: oliver006/redis_exporter
@@ -269,18 +317,17 @@ services:
       - haproxy
     networks:
       - app-net
-    deploy:
-      placement:
-        constraints:
-          - node.hostname == swarm-manager
 
 configs:
   haproxy_config:
     file: ./haproxy.cfg
-  redis_sentinel_conf:
-    file: ./sentinel.conf
+  loki-config:
+    file: ./loki-config.yaml
   redis_sentinel_entrypoint:
     file: ./redis-sentinel-entrypoint.sh
+  redis_sentinel_conf:
+    file: ./sentinel.conf
+
 
 
 networks:
@@ -288,9 +335,11 @@ networks:
     driver: overlay
 
 volumes:
-  mongo1_data:
-  mongo2_data:
-  redis_master_data:
-  redis_slave_data:
+  mongo1-data:
+  mongo2-data:
+  mongo3-data:
+  redis-master-data:
+  redis-replica1-data:
+  redis-replica2-data:
   grafana-data:
 
