@@ -8,13 +8,14 @@ services:
         target: /etc/loki/loki-config.yaml
     command: -config.file=/etc/loki/loki-config.yaml
     volumes:
-      - /home/azureuser/gcp-docker-swarm-monitoring/loki-data:/loki
+      - /home/pallavi/docker-swarm-project/loki-data:/loki
+    ports:
+      - "3100:3100"
     deploy:
       placement:
         constraints:
           - node.hostname == docker-swarm-mgr-1
-    ports:
-      - "3100:3100"
+
 
   promtail:
     image: grafana/promtail:2.9.4
