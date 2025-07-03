@@ -1,27 +1,36 @@
 version: '3.8'
-
 services:
   loki:
     image: grafana/loki:2.9.4
-    configs:
-      - source: loki-config
-        target: /etc/loki/loki-config.yaml
-    command: -config.file=/etc/loki/loki-config.yaml
-    volumes:
-      - /home/pallavi/docker-swarm-project/loki-data:/loki
+    user: "10001:10001"
     ports:
       - "3100:3100"
+    volumes:
+      - /home/pallavi/docker-swarm-project/loki-config.yaml:/etc/loki/loki-config.yaml
+      - /home/pallavi/docker-swarm-project/loki-data/chunks:/loki/chunks
+      - /home/pallavi/docker-swarm-project/loki-data/rules:/loki/rules
+      - /home/pallavi/docker-swarm-project/loki-data/index:/loki/index
+      - /home/pallavi/docker-swarm-project/loki-data/compactor:/loki/compactor
+      - /home/pallavi/docker-swarm-project/loki-data/wal:/loki/wal
+    command: -config.file=/etc/loki/loki-config.yaml
+    networks:
+      - app-net
     deploy:
       placement:
         constraints:
-          - node.hostname == docker-swarm-mgr-1
+          - node.hostname == swarm-manager-1
+      restart_policy:
+        condition: on-failure
+
 
 
   promtail:
     image: grafana/promtail:2.9.4
-    command: -config.file=/etc/promtail/promtail.yaml
+    command: -config.file=/etc/promtail/promtail.yaml -config.expand-env=true
+    configs:
+      - source: promtail-config
+        target: /etc/promtail/promtail.yaml
     volumes:
-      - ./promtail-config.yaml:/etc/promtail/promtail.yaml
       - /var/lib/docker/containers:/var/lib/docker/containers:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /etc/machine-id:/etc/machine-id:ro
@@ -30,6 +39,8 @@ services:
       - app-net
     deploy:
       mode: global
+      restart_policy:
+        condition: on-failure
 
   cadvisor:
     image: gcr.io/cadvisor/cadvisor:v0.47.2
@@ -44,6 +55,8 @@ services:
       - app-net
     deploy:
       mode: global
+      restart_policy:
+        condition: on-failure
 
   nginx:
     image: nginx:latest
@@ -59,6 +72,8 @@ services:
       placement:
         constraints:
           - node.role == manager
+      restart_policy:
+        condition: on-failure
 
   node:
     image: pallavitarke04/nodeapp:latest
@@ -69,11 +84,11 @@ services:
       - app-net
     deploy:
       replicas: 2
+      restart_policy:
+        condition: on-failure
 
   mongo1:
     image: mongo:6
-    container_name: mongo1
-    restart: always
     ports:
       - "27017:27017"
     volumes:
@@ -84,12 +99,12 @@ services:
     deploy:
       placement:
         constraints:
-          - node.hostname == docker-swarm-mgr-1
+          - node.hostname == swarm-manager-1
+      restart_policy:
+        condition: on-failure
 
   mongo2:
     image: mongo:6
-    container_name: mongo2
-    restart: always
     volumes:
       - mongo2-data:/data/db
     command: ["mongod", "--replSet", "rs0"]
@@ -98,13 +113,12 @@ services:
     deploy:
       placement:
         constraints:
-          - node.hostname == docker-swarm-mgr-2
-
+          - node.hostname == swarm-manager-2
+      restart_policy:
+        condition: on-failure
 
   mongo3:
     image: mongo:6
-    container_name: mongo3
-    restart: always
     volumes:
       - mongo3-data:/data/db
     command: ["mongod", "--replSet", "rs0"]
@@ -113,12 +127,13 @@ services:
     deploy:
       placement:
         constraints:
-          - node.hostname == docker-swarm-wrk-1
+          - node.hostname == swarm-worker
+      restart_policy:
+        condition: on-failure
 
   redis-master:
     image: redis:7
     hostname: redis-master
-    restart: always
     ports:
       - "6379:6379"
     volumes:
@@ -129,13 +144,11 @@ services:
       placement:
         constraints:
           - node.role == manager
-
-
+      restart_policy:
+        condition: on-failure
 
   redis-replica1:
     image: redis:7
-    container_name: redis-replica1
-    restart: always
     depends_on:
       - redis-master
     volumes:
@@ -143,11 +156,12 @@ services:
     command: ["redis-server", "--replicaof", "redis-master", "6379"]
     networks:
       - app-net
+    deploy:
+      restart_policy:
+        condition: on-failure
 
   redis-replica2:
     image: redis:7
-    container_name: redis-replica2
-    restart: always
     depends_on:
       - redis-master
     volumes:
@@ -155,63 +169,71 @@ services:
     command: ["redis-server", "--replicaof", "redis-master", "6379"]
     networks:
       - app-net
+    deploy:
+      restart_policy:
+        condition: on-failure
+  redis-sentinel1:
+    image: redis:7
+    configs:
+      - source: redis_sentinel_conf
+        target: /etc/redis/sentinel.conf.initial
+      - source: redis_sentinel_entrypoint
+        target: /usr/local/bin/redis-sentinel-entrypoint.sh
+        mode: 0555
+    volumes:
+      - redis-sentinel1-data:/etc/redis
+    entrypoint: ["bash", "/usr/local/bin/redis-sentinel-entrypoint.sh"]
+    networks:
+      - app-net
+    deploy:
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
 
-#  redis-sentinel1:
-#    image: redis:7
-#    ports:
-#      - "26379:26379"
-#    configs:
-#      - source: redis_sentinel_conf
-#        target: /etc/redis/sentinel.conf
-#      - source: redis_sentinel_entrypoint
-#        target: /usr/local/bin/redis-sentinel-entrypoint.sh
-#        mode: 0555  # Make sure it's executable
-#    entrypoint: ["bash", "/usr/local/bin/redis-sentinel-entrypoint.sh"]
-#    networks:
-#      - app-net
-#    deploy:
-#      placement:
-#        constraints:
-#          - node.hostname == docker-swarm-mgr-1
+  redis-sentinel2:
+    image: redis:7
+    configs:
+      - source: redis_sentinel_conf
+        target: /etc/redis/sentinel.conf.initial
+      - source: redis_sentinel_entrypoint
+        target: /usr/local/bin/redis-sentinel-entrypoint.sh
+        mode: 0555
+    volumes:
+      - redis-sentinel2-data:/etc/redis
+    entrypoint: ["bash", "/usr/local/bin/redis-sentinel-entrypoint.sh"]
+    networks:
+      - app-net
+    deploy:
+      placement:
+        constraints:
+          - node.hostname == swarm-manager-2
+      restart_policy:
+        condition: on-failure
 
-#  redis-sentinel2:
-#    image: redis:7
-#    ports:
-#      - "26379:26379"
-#    configs:
-#      - source: redis_sentinel_conf
-#        target: /etc/redis/sentinel.conf
-#      - source: redis_sentinel_entrypoint
-#        target: /usr/local/bin/redis-sentinel-entrypoint.sh
-#        mode: 0555  # Make sure it's executable
-#    entrypoint: ["bash", "/usr/local/bin/redis-sentinel-entrypoint.sh"]
-#    networks:
-#      - app-net
-#    deploy:
-#      placement:
-#        constraints:
-#          - node.hostname == docker-swarm-mgr-2
-
-#  redis-sentinel3:
-#    image: redis:7
-#    configs:
-#      - source: redis_sentinel_conf
-#        target: /etc/redis/sentinel.conf
-#      - source: redis_sentinel_entrypoint
-#        target: /usr/local/bin/redis-sentinel-entrypoint.sh
-#        mode: 0555  # Make sure it's executable
-#    entrypoint: ["bash", "/usr/local/bin/redis-sentinel-entrypoint.sh"]
-#    networks:
-#      - app-net
-#    deploy:
-#      placement:
-#        constraints:
-#          - node.hostname == docker-swarm-wrk-1
-
+  redis-sentinel3:
+    image: redis:7
+    configs:
+      - source: redis_sentinel_conf
+        target: /etc/redis/sentinel.conf.initial
+      - source: redis_sentinel_entrypoint
+        target: /usr/local/bin/redis-sentinel-entrypoint.sh
+        mode: 0555
+    volumes:
+      - redis-sentinel3-data:/etc/redis
+    entrypoint: ["bash", "/usr/local/bin/redis-sentinel-entrypoint.sh"]
+    networks:
+      - app-net
+    deploy:
+      placement:
+        constraints:
+          - node.hostname == swarm-worker
+      restart_policy:
+        condition: on-failure
 
   haproxy:
     image: haproxy:latest
-    container_name: haproxy
     configs:
       - source: haproxy_config
         target: /usr/local/etc/haproxy/haproxy.cfg
@@ -227,7 +249,8 @@ services:
       placement:
         constraints:
           - node.role == manager
-
+      restart_policy:
+        condition: on-failure
   vault:
     image: hashicorp/vault:1.15.4
     cap_add:
@@ -243,7 +266,8 @@ services:
       placement:
         constraints:
           - node.role == manager
-
+      restart_policy:
+        condition: on-failure
   prometheus:
     image: prom/prometheus
     ports:
@@ -256,7 +280,8 @@ services:
       placement:
         constraints:
           - node.role == manager
-
+      restart_policy:
+        condition: on-failure
   grafana:
     image: grafana/grafana:latest
     ports:
@@ -264,12 +289,13 @@ services:
     volumes:
       - grafana-data:/var/lib/grafana
     networks:
-      - app-net 
+      - app-net
     deploy:
       placement:
         constraints:
           - node.role == manager
-
+      restart_policy:
+        condition: on-failure
   node-exporter:
     image: prom/node-exporter:latest
     ports:
@@ -278,7 +304,8 @@ services:
       - app-net
     deploy:
       mode: global
-
+      restart_policy:
+        condition: on-failure
   mongo-exporter:
     image: bitnami/mongodb-exporter:0.40.0
     ports:
@@ -287,7 +314,9 @@ services:
       - MONGODB_URI=mongodb://mongo1:27017
     networks:
       - app-net
-
+    deploy:
+      restart_policy:
+        condition: on-failure
   redis_exporter:
     image: oliver006/redis_exporter
     ports:
@@ -298,8 +327,12 @@ services:
       - haproxy
     networks:
       - app-net
-
+    deploy:
+      restart_policy:
+        condition: on-failure
 configs:
+  promtail-config:
+    file: ./promtail-config.yaml
   haproxy_config:
     file: ./haproxy.cfg
   loki-config:
@@ -309,13 +342,14 @@ configs:
   redis_sentinel_conf:
     file: ./sentinel.conf
 
-
-
 networks:
   app-net:
     driver: overlay
-
+    attachable: true
 volumes:
+  redis-sentinel1-data:
+  redis-sentinel2-data:
+  redis-sentinel3-data:
   mongo1-data:
   mongo2-data:
   mongo3-data:
@@ -323,4 +357,3 @@ volumes:
   redis-replica1-data:
   redis-replica2-data:
   grafana-data:
-
