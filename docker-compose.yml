@@ -121,15 +121,15 @@ services:
     image: mongo:6
     volumes:
       - mongo3-data:/data/db
-    command: ["mongod", "--replSet", "rs0"]
     networks:
       - app-net
     deploy:
       placement:
         constraints:
-          - node.hostname == swarm-worker
+          - node.hostname == swarm-work
       restart_policy:
         condition: on-failure
+
 
   redis-master:
     image: redis:7
@@ -228,7 +228,7 @@ services:
     deploy:
       placement:
         constraints:
-          - node.hostname == swarm-worker
+          - node.hostname == swarm-work
       restart_policy:
         condition: on-failure
 
@@ -306,17 +306,22 @@ services:
       mode: global
       restart_policy:
         condition: on-failure
+
   mongo-exporter:
     image: bitnami/mongodb-exporter:0.40.0
     ports:
       - "9216:9216"
     environment:
-      - MONGODB_URI=mongodb://mongo1:27017
+      - MONGODB_URI=mongodb://mongo1:27017/?replicaSet=rs0
     networks:
       - app-net
     deploy:
+      placement:
+        constraints:
+          - node.hostname == swarm-manager-1
       restart_policy:
         condition: on-failure
+
   redis_exporter:
     image: oliver006/redis_exporter
     ports:
