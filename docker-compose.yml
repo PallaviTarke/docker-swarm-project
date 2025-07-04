@@ -63,7 +63,7 @@ services:
     ports:
       - "80:80"
     volumes:
-      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf
+      - /home/pallavi/docker-swarm-project/nginx/default.conf:/etc/nginx/conf.d/default.conf
     depends_on:
       - node
     networks:
@@ -126,7 +126,7 @@ services:
     deploy:
       placement:
         constraints:
-          - node.hostname == swarm-work
+          - node.hostname == swarm-worker
       restart_policy:
         condition: on-failure
 
@@ -172,6 +172,7 @@ services:
     deploy:
       restart_policy:
         condition: on-failure
+
   redis-sentinel1:
     image: redis:7
     configs:
@@ -228,7 +229,7 @@ services:
     deploy:
       placement:
         constraints:
-          - node.hostname == swarm-work
+          - node.hostname == swarm-worker
       restart_policy:
         condition: on-failure
 
@@ -282,6 +283,7 @@ services:
           - node.role == manager
       restart_policy:
         condition: on-failure
+
   grafana:
     image: grafana/grafana:latest
     ports:
@@ -351,6 +353,7 @@ networks:
   app-net:
     driver: overlay
     attachable: true
+
 volumes:
   redis-sentinel1-data:
   redis-sentinel2-data:
